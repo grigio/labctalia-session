@@ -115,7 +115,9 @@ jobs:
           # The post_install script must not need /etc/greetd (and must not
           # edit it). Verify the units resolve, then remove the package.
           install -d -m 700 /tmp/run
-          XDG_RUNTIME_DIR=/tmp/run systemd-analyze --user verify \
+          # --man=no: labwc is not installed here (--nodeps), so verify would
+          # otherwise fail on the man:labwc(1) entry in Documentation=.
+          XDG_RUNTIME_DIR=/tmp/run systemd-analyze --user verify --man=no \
             /usr/lib/systemd/user/labctalia-session.target \
             /usr/lib/systemd/user/labctalia-noctalia.service \
             /usr/lib/systemd/user/labctalia-theme-sync.path \
