@@ -1,0 +1,325 @@
+#!/usr/bin/env python3
+"""Sync Noctalia V5 active colors to labwc window decorations (Labctalia).
+
+Installed as /usr/bin/labctalia-theme-sync. The optional
+labctalia-theme-sync.path unit runs it when Noctalia's settings or colors
+change. It prefers Noctalia's own template rendering (which can include the
+labwc themerc); if that is unavailable it falls back to colors.json and
+writes ~/.config/labwc/themerc-override itself.
+"""
+
+import argparse
+import json
+import logging
+import os
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+log = logging.getLogger("labctalia-theme-sync")
+
+COLORS_JSON = Path.home() / ".config/noctalia/colors.json"
+STATE_FILE = Path.home() / ".local/state/noctalia/settings.toml"
+LABWC_THEME = Path.home() / ".config/labwc/themerc-override"
+LOG_FILE = Path.home() / ".local/state/labctalia/theme-sync.log"
+LOG_MAX_BYTES = 512 * 1024
+NOCTALIA = "/usr/bin/noctalia"
+LABWC = "/usr/bin/labwc"
+
+DEFAULT_PALETTE = {
+    "mPrimary": "#589bda",
+    "mOnSurface": "#e6e1e6",
+    "mOnSurfaceVariant": "#c4c4c4",
+    "mOutline": "#888888",
+    "mSurface": "#1a1a20",
+    "mSurfaceVariant": "#49454f",
+    "mShadow": "#000000",
+}
+
+
+def hex_to_rgb(h: str) -> tuple[int, int, int]:
+    h = h.lstrip("#")
+    if len(h) < 6:
+        raise ValueError(f"Hex color too short: #{h}")
+    if len(h) > 8:
+        raise ValueError(f"Hex color too long: #{h}")
+    try:
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except ValueError as e:
+        raise ValueError(f"Invalid hex color: #{h}") from e
+
+
+def rgb_to_hex(r: int, g: int, b: int) -> str:
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def lighten(hex_color: str, factor: int) -> str:
+    r, g, b = hex_to_rgb(hex_color)
+    f = factor / 100
+    return rgb_to_hex(
+        min(255, r + int((255 - r) * f)),
+        min(255, g + int((255 - g) * f)),
+        min(255, b + int((255 - b) * f)),
+    )
+
+
+def darken(hex_color: str, factor: int) -> str:
+    r, g, b = hex_to_rgb(hex_color)
+    f = factor / 100
+    return rgb_to_hex(
+        max(0, int(r * (1 - f))),
+        max(0, int(g * (1 - f))),
+        max(0, int(b * (1 - f))),
+    )
+
+
+def _srgb_to_linear(c: float) -> float:
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def luminance(hex_color: str) -> float:
+    r, g, b = (x / 255 for x in hex_to_rgb(hex_color))
+    return 0.2126 * _srgb_to_linear(r) + 0.7152 * _srgb_to_linear(g) + 0.0722 * _srgb_to_linear(b)
+
+
+def contrast_ratio(c1: str, c2: str) -> float:
+    l1, l2 = luminance(c1) + 0.05, luminance(c2) + 0.05
+    return max(l1, l2) / min(l1, l2)
+
+
+def ensure_contrast(fg: str, bg: str, min_ratio: float = 4.5) -> str:
+    is_dark = luminance(bg) < 0.5
+    for _ in range(20):
+        if contrast_ratio(fg, bg) >= min_ratio:
+            return fg
+        if is_dark:
+            fg = lighten(fg, 10)
+        else:
+            fg = darken(fg, 10)
+    return "#ffffff" if is_dark else "#000000"
+
+
+def run(cmd: list[str]) -> str | None:
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            log.debug("Command failed: %s — stderr: %s", " ".join(cmd), r.stderr.strip())
+            return None
+        return r.stdout.strip()
+    except FileNotFoundError:
+        log.debug("Command not found: %s", " ".join(cmd))
+        return None
+
+
+def read_json(path: Path) -> dict | None:
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def get_palette() -> dict:
+    colors = read_json(COLORS_JSON)
+    required = ("mPrimary", "mOnSurface", "mOnSurfaceVariant", "mOutline")
+    if colors and all(k in colors for k in required):
+        return colors
+    log.warning(
+        "Could not read palette from %s; using hardcoded defaults",
+        COLORS_JSON,
+    )
+    return dict(DEFAULT_PALETTE)
+
+
+def get_mode() -> str:
+    m = run([NOCTALIA, "msg", "theme-mode-get"])
+    if m:
+        return m
+    try:
+        with open(STATE_FILE, "rb") as f:
+            import tomllib
+            state = tomllib.load(f)
+            mode = state.get("theme", {}).get("mode", "dark")
+            if mode not in ("dark", "light"):
+                mode = "dark"
+            return mode
+    except Exception:
+        log.warning(
+            "Could not determine theme mode (state file: %s); falling back to 'dark'",
+            STATE_FILE,
+        )
+        return "dark"
+
+
+def _invert_for_light(hex_color: str) -> str:
+    """Roughly invert a dark-mode color for light-mode use (continuous mapping)."""
+    lum = luminance(hex_color)
+    if lum < 0.5:
+        factor = int(85 * (1 - lum / 0.5))
+        return lighten(hex_color, max(0, factor))
+    else:
+        factor = int(80 * (lum - 0.5) / 0.5)
+        return darken(hex_color, max(0, factor))
+
+
+def generate_themerc(palette: dict, mode: str) -> str:
+    is_dark = mode == "dark"
+
+    p = palette["mPrimary"]
+    outline = palette["mOutline"]
+    sv = palette.get("mSurfaceVariant", DEFAULT_PALETTE["mSurfaceVariant"])
+    shadow = palette.get("mShadow", DEFAULT_PALETTE["mShadow"])
+    on_surface = palette["mOnSurface"]
+    on_surface_variant = palette["mOnSurfaceVariant"]
+    surface = palette.get("mSurface", DEFAULT_PALETTE["mSurface"])
+
+    if is_dark:
+        active_bg = sv
+        active_fg = on_surface
+        inactive_bg = surface
+        inactive_fg = on_surface_variant
+        btn_color = on_surface_variant
+    else:
+        active_bg = _invert_for_light(sv)
+        active_fg = _invert_for_light(on_surface)
+        inactive_bg = _invert_for_light(surface)
+        inactive_fg = _invert_for_light(on_surface_variant)
+        btn_color = _invert_for_light(on_surface_variant)
+
+    active_fg = ensure_contrast(active_fg, active_bg, 4.5)
+    inactive_fg = ensure_contrast(inactive_fg, inactive_bg, 3.0)
+    btn_color = ensure_contrast(btn_color, active_bg, 3.0)
+    inactive_btn_color = ensure_contrast(inactive_fg, inactive_bg, 3.0)
+
+    return f"""# Auto-generated from Noctalia V5 — mode={mode}
+
+window.active.title.bg.color: {active_bg}
+window.active.title.bg: flat
+window.active.label.text.color: {active_fg}
+window.active.border.color: {p}
+window.active.handle.bg.color: {active_bg}
+window.active.handle.bg: flat
+window.active.grip.bg.color: {active_bg}
+window.active.grip.bg: flat
+
+window.inactive.title.bg.color: {inactive_bg}
+window.inactive.title.bg: flat
+window.inactive.label.text.color: {inactive_fg}
+window.inactive.border.color: {outline}
+window.inactive.handle.bg.color: {inactive_bg}
+window.inactive.handle.bg: flat
+window.inactive.grip.bg.color: {inactive_bg}
+window.inactive.grip.bg: flat
+
+window.active.button.unpressed.image.color: {btn_color}
+window.active.button.hover.image.color: {p}
+window.active.button.pressed.image.color: {p}
+window.inactive.button.unpressed.image.color: {inactive_btn_color}
+window.inactive.button.hover.image.color: {inactive_btn_color}
+window.inactive.button.pressed.image.color: {inactive_btn_color}
+
+window.active.shadow.size: 40
+window.inactive.shadow.size: 28
+window.active.shadow.color: {shadow}55
+window.inactive.shadow.color: {active_bg}40
+"""
+
+
+def write_themerc(path: Path, content: str) -> bool:
+    try:
+        if path.read_text() == content:
+            return False
+    except FileNotFoundError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    return True
+
+
+def labwc_reconfigure():
+    wayland_display = os.environ.get("WAYLAND_DISPLAY")
+    xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if not wayland_display or not xdg_runtime_dir:
+        log.warning("WAYLAND_DISPLAY/XDG_RUNTIME_DIR not set; skipping labwc reload")
+        return
+    if not os.environ.get("LABWC_PID"):
+        log.warning("LABWC_PID not set; skipping labwc reload")
+        return
+    socket_path = Path(xdg_runtime_dir) / wayland_display
+    for _ in range(50):
+        if socket_path.is_socket():
+            break
+        time.sleep(0.1)
+    else:
+        log.warning("Wayland socket %s not found after 5s", socket_path)
+        return
+    r = run([LABWC, "--reconfigure"])
+    if r is None:
+        log.warning("labwc --reconfigure failed (is labwc running?)")
+    else:
+        log.info("labwc reloaded")
+
+
+def rotate_log(path: Path, max_bytes: int):
+    try:
+        size = path.stat().st_size
+    except FileNotFoundError:
+        return
+    if size <= max_bytes:
+        return
+    rotated = path.with_suffix(".log.old")
+    shutil.move(str(path), str(rotated))
+    log.info("Rotated log (was %d bytes)", size)
+
+
+def main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(description="Sync Noctalia V5 colors to labwc")
+    p.add_argument("--dry-run", action="store_true", help="Preview without writing")
+    p.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
+    p.add_argument("--version", action="version", version="1.0.0")
+    args = p.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(levelname)s: %(message)s",
+    )
+
+    log_dir = LOG_FILE.parent
+    log_dir.mkdir(parents=True, exist_ok=True)
+    rotate_log(LOG_FILE, LOG_MAX_BYTES)
+    with open(LOG_FILE, "a") as f:
+        f.write(f"[{datetime.now().isoformat()}] "
+                f"pid={os.getpid()} argv={' '.join(argv)}\n")
+
+    r = run([NOCTALIA, "msg", "templates-apply"])
+    if r == "ok":
+        log.info("Applied Noctalia templates (includes labwc themerc)")
+        if not args.dry_run:
+            labwc_reconfigure()
+        return 0
+
+    log.warning("noctalia templates-apply failed; falling back to colors.json")
+    palette = get_palette()
+    log.info("Read palette from %s", COLORS_JSON.name)
+    mode = get_mode()
+    log.info("Theme mode: %s", mode)
+
+    themerc = generate_themerc(palette, mode)
+
+    if args.dry_run:
+        print(themerc, end="")
+        return 0
+
+    if write_themerc(LABWC_THEME, themerc):
+        log.info("Wrote %s", LABWC_THEME)
+        labwc_reconfigure()
+    else:
+        log.info("No changes to %s", LABWC_THEME)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

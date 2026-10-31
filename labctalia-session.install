@@ -1,0 +1,63 @@
+# The package installs the session and its systemd user units. It deliberately
+# does not edit /etc/greetd: installing a package should not change which
+# session the greeter starts. Making Labctalia the default is an explicit step.
+post_install() {
+  cat <<'EOF'
+Labctalia is installed. It was NOT set as the default session: this package
+does not edit /etc/greetd.
+
+Greeters that read /usr/share/wayland-sessions (Noctalia Greeter, GDM, SDDM)
+already list it. gtkgreet only lists /etc/greetd/environments plus its -c
+argument. To make Labctalia selectable without changing the default:
+
+  sudo labctalia-session-default --list
+
+To make it the default, run:
+  sudo labctalia-session-default
+
+If you already use labwc, this package does not touch ~/.config/labwc. Remove
+these duplicates so the session's systemd units are the only owners:
+
+  - ~/.config/labwc/environment: remove XDG_CURRENT_DESKTOP, or set it to
+    labctalia:wlroots (the launcher exports it).
+  - ~/.config/labwc/autostart: remove noctalia, theme-sync, gesture and
+    portal startup lines. They are started by labctalia-session.target. If
+    you keep them, guard just those lines with LABCTALIA_SESSION.
+  - Old personal units (not namespaced): disable noctalia-labwc-sync.path and
+    labwc-4finger-gestures.service before enabling the labctalia-* units.
+
+Optional helpers are opt-in:
+  systemctl --user enable --now labctalia-theme-sync.path
+  systemctl --user enable --now labctalia-gestures.service  # needs input group
+EOF
+}
+
+post_upgrade() {
+  cat <<'EOF'
+Labctalia was upgraded. The package still does not edit /etc/greetd or
+~/.config/labwc. If you use the optional theme sync or gestures, re-enable
+them if a previous removal left dangling symlinks:
+
+  systemctl --user daemon-reload
+  systemctl --user enable --now labctalia-theme-sync.path
+  systemctl --user enable --now labctalia-gestures.service
+EOF
+}
+
+pre_remove() {
+  cat <<'EOF'
+Removing this package does not change /etc/greetd. If Labctalia is the greeter
+default, point the greeter at another session first, otherwise it will try to
+start a command that no longer exists.
+
+  sudo cp -a /etc/greetd/config.toml.bak.<timestamp> /etc/greetd/config.toml
+
+(or edit the -c argument / environments list by hand).
+
+If you enabled the optional user units, disable them before removing the
+package so no dangling symlinks remain in ~/.config/systemd/user:
+
+  systemctl --user disable --now labctalia-theme-sync.path
+  systemctl --user disable --now labctalia-gestures.service
+EOF
+}

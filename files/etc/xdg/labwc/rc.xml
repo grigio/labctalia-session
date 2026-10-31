@@ -1,0 +1,177 @@
+<?xml version="1.0"?>
+<!--
+  Labctalia default labwc configuration.
+
+  This is the system-wide default (/etc/xdg/labwc/rc.xml). labwc reads
+  ~/.config/labwc/rc.xml first; copy this file there to customise it.
+  The macos-dark theme and the keybinds below are the Labctalia defaults.
+-->
+<labwc_config>
+  <core>
+    <perMonitorDesktop>no</perMonitorDesktop>
+    <xwayland>no</xwayland>
+  </core>
+  <windowSwitcher>
+    <osd show="yes" style="thumbnail" />
+  </windowSwitcher>
+  <resize>
+    <minimumArea>16</minimumArea>
+    <cornerRange>20</cornerRange>
+  </resize>
+  <!-- Blur behind windows that request it (ext-background-effect-v1).
+       Only labwc-blur implements this; stock labwc ignores the block with a
+       warning. Tuned by the macos-dark theme. To go back to defaults, delete
+       this block, then reload with W-A-r. -->
+  <blur>
+    <passes>4</passes>
+    <radius>7</radius>
+    <noise>0.02</noise>
+    <brightness>0.9</brightness>
+    <contrast>0.9</contrast>
+    <saturation>1.1</saturation>
+    <strength>1.0</strength>
+  </blur>
+
+  <placement>
+    <policy>automatic</policy>
+  </placement>
+  <theme>
+    <name>macos-dark</name>
+    <!-- macOS: traffic lights on the right (minimize, maximize, close),
+         title centered. The left section of the layout is intentionally
+         empty. -->
+    <titlebar>
+      <layout>:iconify,max,close</layout>
+      <showTitle>yes</showTitle>
+    </titlebar>
+    <cornerRadius>12</cornerRadius>
+    <font name="Inter" size="12"/>
+    <font place="ActiveWindow">
+      <name>Inter</name>
+      <size>11</size>
+      <weight>semibold</weight>
+    </font>
+    <font place="InactiveWindow">
+      <name>Inter</name>
+      <size>11</size>
+      <weight>medium</weight>
+    </font>
+    <font place="MenuItem">
+      <name>Inter</name>
+      <size>12</size>
+      <weight>normal</weight>
+    </font>
+    <font place="MenuHeader">
+      <name>Inter</name>
+      <size>12</size>
+      <weight>medium</weight>
+    </font>
+    <font place="OnScreenDisplay">
+      <name>Inter</name>
+      <size>11</size>
+      <weight>medium</weight>
+    </font>
+    <dropShadows>yes</dropShadows>
+    <keepBorder>no</keepBorder>
+  </theme>
+  <desktops number="4" />
+  <cursor theme="Adwaita" size="24"/>
+
+  <keyboard>
+    <default/>
+    <keybind key="XF86AudioLowerVolume">
+      <action name="Execute" command="/usr/bin/wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"/>
+    </keybind>
+    <keybind key="XF86AudioRaiseVolume">
+      <action name="Execute" command="/usr/bin/wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"/>
+    </keybind>
+    <keybind key="XF86AudioMute">
+      <action name="Execute" command="/usr/bin/wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"/>
+    </keybind>
+    <keybind key="XF86AudioPlay">
+      <action name="Execute" command="/usr/bin/playerctl play-pause"/>
+    </keybind>
+    <keybind key="XF86AudioPause">
+      <action name="Execute" command="/usr/bin/playerctl play-pause"/>
+    </keybind>
+
+    <!-- Override labwc's built-in brightness keys (hardcoded +10%/-10%) with
+         a finer 3% step. Requires brightnessctl (optdepends). -->
+    <keybind key="XF86MonBrightnessUp">
+      <action name="Execute" command="/usr/bin/brightnessctl set 3%+"/>
+    </keybind>
+    <keybind key="XF86MonBrightnessDown">
+      <action name="Execute" command="/usr/bin/brightnessctl set 3%-"/>
+    </keybind>
+
+    <keybind key="W-Up">
+      <action name="ToggleMaximize" direction="both" />
+    </keybind>
+    <keybind key="W-Down">
+      <action name="ToggleMaximize" direction="both" />
+    </keybind>
+
+    <keybind key="W-S-Right">
+      <action name="SendToDesktop" to="right" follow="yes" wrap="yes" />
+      <action name="Focus" />
+    </keybind>
+    <keybind key="W-S-Left">
+      <action name="SendToDesktop" to="left" follow="yes" wrap="yes" />
+      <action name="Focus" />
+    </keybind>
+
+    <keybind key="W-w"><action name="Close" /></keybind>
+
+    <keybind key="C-W-Left"><action name="GoToDesktop" to="left" /></keybind>
+    <keybind key="C-W-Right"><action name="GoToDesktop" to="right" /></keybind>
+
+    <keybind key="W-1"><action name="GoToDesktop" to="1" /></keybind>
+    <keybind key="W-2"><action name="GoToDesktop" to="2" /></keybind>
+    <keybind key="W-3"><action name="GoToDesktop" to="3" /></keybind>
+    <keybind key="W-4"><action name="GoToDesktop" to="4" /></keybind>
+
+    <keybind key="W-Return">
+      <action name="Execute" command="/usr/bin/lab-sensible-terminal"/>
+    </keybind>
+    <keybind key="W-A-r">
+      <action name="Execute" command="/usr/bin/labwc --reconfigure"/>
+    </keybind>
+
+    <keybind key="W-Space">
+      <action name="Execute" command="/usr/bin/noctalia msg panel-toggle launcher"/>
+    </keybind>
+
+    <!-- Power button / lock-and-suspend -->
+    <keybind key="XF86PowerOff">
+      <action name="Execute" command="/usr/bin/noctalia msg session lock-and-suspend"/>
+    </keybind>
+    <keybind key="W-Escape">
+      <action name="Execute" command="/usr/bin/noctalia msg session lock-and-suspend"/>
+    </keybind>
+    <keybind key="W-S-w">
+      <action name="Execute" command="/usr/bin/noctalia msg panel-toggle session"/>
+    </keybind>
+
+    <keybind key="Print">
+      <action name="Execute" command="/usr/bin/labctalia-screenshot"/>
+    </keybind>
+  </keyboard>
+
+  <touch mouseEmulation="yes" />
+  <mouse>
+    <default/>
+    <context name="root">
+      <mousebind button="Right" action="Press">
+        <action name="ShowMenu" menu="root-menu"/>
+      </mousebind>
+    </context>
+  </mouse>
+  <libinput>
+    <device category="touchpad">
+      <tapAndDrag>yes</tapAndDrag>
+      <dragLock>yes</dragLock>
+      <naturalScroll>yes</naturalScroll>
+      <threeFingerDrag>no</threeFingerDrag>
+    </device>
+  </libinput>
+</labwc_config>

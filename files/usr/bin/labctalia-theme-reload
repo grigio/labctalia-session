@@ -1,0 +1,17 @@
+#!/bin/sh
+# Noctalia template post_hook for Labctalia.
+#
+# Noctalia renders its labwc themerc template and then runs this hook in every
+# session, including sessions that are not labwc. labwc exports LABWC_PID for
+# its children; `labwc --reconfigure` needs it, so everywhere else this is a
+# no-op.
+#
+# Configure it in ~/.config/noctalia/config.toml:
+#
+#   [theme.templates.user.labwc-themerc]
+#   input_path = "~/.config/noctalia/templates/labwc.conf"
+#   output_path = "~/.config/labwc/themerc-override"
+#   post_hook = "/usr/bin/labctalia-theme-reload"
+[ -n "${LABWC_PID:-}" ] || exit 0
+
+exec /usr/bin/labwc --reconfigure

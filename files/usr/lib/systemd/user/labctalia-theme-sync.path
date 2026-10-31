@@ -1,0 +1,13 @@
+[Unit]
+Description=Watch Noctalia colors for Labctalia theme sync
+Documentation=https://github.com/grigio/labctalia-session
+PartOf=labctalia-session.target
+
+[Path]
+PathChanged=%h/.local/state/noctalia/settings.toml
+PathChanged=%h/.config/noctalia/colors.json
+Unit=labctalia-theme-sync.service
+
+[Install]
+# Opt-in: `systemctl --user enable --now labctalia-theme-sync.path`.
+WantedBy=labctalia-session.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=Labctalia session (labwc + Noctalia)
+Documentation=man:labwc(1) man:systemd.special(7) https://github.com/grigio/labctalia-session
+# The generic session target is what portals and other graphical-session
+# services attach to. Starting this target pulls it in (BindsTo implies
+# Requires) and stopping it tears the session down.
+BindsTo=graphical-session.target
+Wants=graphical-session-pre.target labctalia-noctalia.service
+After=graphical-session-pre.target

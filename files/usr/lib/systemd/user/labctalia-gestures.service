@@ -1,0 +1,23 @@
+[Unit]
+Description=4-finger touchpad workspace switch (Labctalia)
+Documentation=https://github.com/grigio/labctalia-session
+PartOf=labctalia-session.target
+After=labctalia-session.target
+ConditionPathExists=/usr/bin/python3
+ConditionPathExists=/usr/bin/libinput
+ConditionPathExists=/usr/bin/wtype
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/labctalia-4finger-gestures
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=5
+Slice=session.slice
+
+[Install]
+# Opt-in: `systemctl --user enable --now labctalia-gestures.service`.
+# The user must be in the `input` group for libinput debug-events.
+WantedBy=labctalia-session.target

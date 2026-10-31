@@ -1,0 +1,26 @@
+#!/bin/sh
+# Labctalia screenshot helper: select a region with slurp, capture it with
+# grim, then annotate it with satty if available. Without satty the PNG is
+# saved under ~/Pictures and copied to the clipboard when wl-copy is present.
+#
+# grim and slurp are hard dependencies; satty and wl-clipboard are optdepends.
+# Bound to Print in /etc/xdg/labwc/rc.xml.
+set -eu
+
+dir="${XDG_PICTURES_DIR:-$HOME/Pictures}"
+mkdir -p "$dir"
+file="$dir/Screenshot-$(date +%Y%m%d-%H%M%S).png"
+
+# slurp exits non-zero when the selection is cancelled; that is not an error.
+geometry=$(slurp) || exit 0
+grim -g "$geometry" "$file"
+
+if command -v satty >/dev/null 2>&1; then
+    # satty opens the capture; Enter copies the annotated image to the
+    # clipboard (the same workflow as the upstream macos-dark rc.xml).
+    exec satty --filename "$file" --actions-on-enter save-to-clipboard
+fi
+
+if command -v wl-copy >/dev/null 2>&1; then
+    wl-copy <"$file"
+fi

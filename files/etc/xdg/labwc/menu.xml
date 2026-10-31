@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<!-- Labctalia default root menu. Shown by right-clicking the desktop (see
+     the ShowMenu binding in /etc/xdg/labwc/rc.xml). -->
+<openbox_menu>
+  <menu id="root-menu" label="Labctalia">
+    <item label="Launcher">
+      <action name="Execute">
+        <command>/usr/bin/noctalia msg panel-toggle launcher</command>
+      </action>
+    </item>
+    <item label="Terminal">
+      <action name="Execute">
+        <command>/usr/bin/lab-sensible-terminal</command>
+      </action>
+    </item>
+    <item label="Screenshot">
+      <action name="Execute">
+        <command>/usr/bin/labctalia-screenshot</command>
+      </action>
+    </item>
+    <separator/>
+    <item label="Reconfigure">
+      <action name="Reconfigure"/>
+    </item>
+    <item label="Lock and suspend">
+      <action name="Execute">
+        <command>/usr/bin/noctalia msg session lock-and-suspend</command>
+      </action>
+    </item>
+  </menu>
+</openbox_menu>

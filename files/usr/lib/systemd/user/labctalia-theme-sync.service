@@ -1,0 +1,12 @@
+[Unit]
+Description=Sync Noctalia colors to labwc window decorations (Labctalia)
+Documentation=https://github.com/grigio/labctalia-session
+PartOf=labctalia-session.target
+After=labctalia-noctalia.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/labctalia-theme-sync
+TimeoutStartSec=30
+
+# Triggered by labctalia-theme-sync.path; no [Install] section.

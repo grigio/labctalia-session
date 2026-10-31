@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""4-finger touchpad swipe -> labwc workspace switch (Wayland-native).
+
+Reads `libinput debug-events`, accumulates SWIPE dx/dy for 4-finger
+gestures, then emulates Ctrl+Super+Left/Right via `wtype`
+(which matches the GoToDesktop keybinds in the Labctalia rc.xml).
+
+Direction (GNOME-style, natural):
+  swipe LEFT  (fingers move left)  -> next workspace (Right)
+  swipe RIGHT (fingers move right) -> previous workspace (Left)
+  swipe UP    -> next workspace (Right)
+  swipe DOWN  -> previous workspace (Left)
+
+Needs: user in `input` group, `wtype`, `libinput`. Install with the optional
+labctalia-gestures.service unit; it is not started by default.
+"""
+
+import os
+import re
+import subprocess
+import sys
+import time
+
+THRESHOLD = float(os.environ.get("LABWC_GESTURE_THRESHOLD", "70.0"))
+COOLDOWN = float(os.environ.get("LABWC_GESTURE_COOLDOWN", "0.6"))
+WTYPE = "/usr/bin/wtype"
+LIBINPUT = "/usr/bin/libinput"
+
+RE_BEGIN = re.compile(r"GESTURE_SWIPE_BEGIN\s+\+\S+\s+(\d+)\s*$")
+RE_UPDATE = re.compile(r"GESTURE_SWIPE_UPDATE\s+(?:\d+\s+)?\+\S+\s+(\d+)\s+(-?[\d.]+)/\s*(-?[\d.]+)")
+RE_END = re.compile(r"GESTURE_SWIPE_END\s+\+\S+\s+(\d+)\s*$")
+RE_CANCEL = re.compile(r"GESTURE_SWIPE_CANCELLED|GESTURE_CANCELLED")
+
+
+def send_key(key: str) -> None:
+    env = dict(os.environ)
+    if not env.get("XDG_RUNTIME_DIR") or not env.get("WAYLAND_DISPLAY"):
+        print(
+            "labctalia-4finger-gestures: XDG_RUNTIME_DIR/WAYLAND_DISPLAY not set",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+    subprocess.run(
+        [WTYPE, "-M", "ctrl", "-M", "logo", "-k", key, "-m", "logo", "-m", "ctrl"],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+
+def decide(dx: float, dy: float) -> str | None:
+    """Return wtype key (Left/Right) or None if below threshold."""
+    if abs(dx) >= abs(dy) and abs(dx) >= THRESHOLD:
+        return "Right" if dx < 0 else "Left"  # swipe left -> next
+    if abs(dy) > abs(dx) and abs(dy) >= THRESHOLD:
+        return "Right" if dy < 0 else "Left"  # swipe up -> next
+    return None
+
+
+def main() -> int:
+    if not os.path.exists(WTYPE):
+        print(f"labctalia-4finger-gestures: {WTYPE} is missing", file=sys.stderr)
+        return 1
+    if not os.path.exists(LIBINPUT):
+        print(f"labctalia-4finger-gestures: {LIBINPUT} is missing", file=sys.stderr)
+        return 1
+    if not os.environ.get("XDG_RUNTIME_DIR") or not os.environ.get("WAYLAND_DISPLAY"):
+        print(
+            "labctalia-4finger-gestures: XDG_RUNTIME_DIR/WAYLAND_DISPLAY not set",
+            file=sys.stderr,
+        )
+        return 1
+
+    fingers = 0
+    dx = dy = 0.0
+    tracking = False
+    last_action = 0.0
+
+    proc = subprocess.Popen(
+        [LIBINPUT, "debug-events"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+    )
+    assert proc.stdout is not None
+    print("labctalia-4finger-gestures: listening (threshold=%.0f)" % THRESHOLD, flush=True)
+
+    # libinput exits immediately when the user cannot read /dev/input/event*.
+    time.sleep(0.2)
+    if proc.poll() is not None:
+        print(
+            "labctalia-4finger-gestures: libinput exited; is the user in the "
+            "'input' group?",
+            file=sys.stderr,
+            flush=True,
+        )
+        return proc.returncode or 1
+
+    for line in proc.stdout:
+        if RE_CANCEL.search(line):
+            tracking = False
+            continue
+        m = RE_BEGIN.search(line)
+        if m:
+            fingers = int(m.group(1))
+            dx = dy = 0.0
+            tracking = fingers == 4
+            continue
+        m = RE_UPDATE.search(line)
+        if m and tracking and int(m.group(1)) == 4:
+            dx += float(m.group(2))
+            dy += float(m.group(3))
+            continue
+        m = RE_END.search(line)
+        if m and tracking:
+            if int(m.group(1)) == 4:
+                # This libinput version reports no totals on END;
+                # use dx/dy accumulated from UPDATE lines.
+                key = decide(dx, dy)
+                now = time.monotonic()
+                if key and now - last_action >= COOLDOWN:
+                    last_action = now
+                    print(f"swipe dx={dx:.0f} dy={dy:.0f} -> {key}", flush=True)
+                    send_key(key)
+            tracking = False
+    return proc.wait()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

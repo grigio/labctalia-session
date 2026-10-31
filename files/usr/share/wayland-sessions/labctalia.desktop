@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Labctalia
+Comment=Minimal labwc desktop with Noctalia
+Comment[it]=Desktop minimale labwc con Noctalia
+Exec=/usr/bin/labctalia-session
+TryExec=/usr/bin/labctalia-session
+Type=Application
+DesktopNames=labctalia;wlroots
+Keywords=labctalia;labwc;noctalia;wayland;

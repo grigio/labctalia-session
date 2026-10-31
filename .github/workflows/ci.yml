@@ -1,0 +1,124 @@
+name: CI
+
+# Cheap sanity checks on every push / pull request: the shell scripts pass
+# shellcheck, the Python helpers compile, the XML parses and the PKGBUILD
+# still builds. Releases are built by arch-package.yml on v* tags.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: shellcheck and syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: shellcheck
+        run: |
+          set -euo pipefail
+          shellcheck -s sh \
+            files/usr/bin/labctalia-session \
+            files/usr/bin/labctalia-screenshot \
+            files/usr/bin/labctalia-theme-reload
+          shellcheck -s bash scripts/*.sh labctalia-session.install
+
+      - name: Python syntax
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            files/usr/bin/labctalia-theme-sync \
+            files/usr/bin/labctalia-4finger-gestures
+
+      - name: XML syntax
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          for path in ("files/etc/xdg/labwc/rc.xml", "files/etc/xdg/labwc/menu.xml"):
+              ET.parse(path)
+              print(f"{path}: ok")
+          PY
+
+  package:
+    name: makepkg
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+      options: --privileged
+    steps:
+      - name: Bootstrap git
+        run: pacman -Syu --noconfirm --needed --disable-download-timeout git
+
+      - uses: actions/checkout@v6
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          useradd -m builder 2>/dev/null || true
+          mkdir -p /tmp/pkgout
+          chown -R builder:builder "$GITHUB_WORKSPACE" /tmp/pkgout
+          # labwc, noctalia and the portals are not in the clean container;
+          # --nodeps keeps the build focused on the packaging.
+          su builder -s /bin/bash -c "
+            cd '$GITHUB_WORKSPACE'
+            PKGDEST=/tmp/pkgout makepkg --nodeps --noconfirm --force
+          "
+          ls -l /tmp/pkgout
+          # the launcher and helpers must be executable inside the package
+          bsdtar -tvf /tmp/pkgout/*.pkg.tar.zst | tee /tmp/pkglist.txt
+          for path in \
+            usr/bin/labctalia-session \
+            usr/bin/labctalia-session-default \
+            usr/bin/labctalia-theme-sync \
+            usr/bin/labctalia-theme-reload \
+            usr/bin/labctalia-4finger-gestures \
+            usr/bin/labctalia-screenshot; do
+            grep -qE "^-rwxr-xr-x .*${path}\$" /tmp/pkglist.txt
+          done
+          for path in \
+            usr/share/wayland-sessions/labctalia.desktop \
+            usr/lib/systemd/user/labctalia-session.target \
+            usr/lib/systemd/user/labctalia-noctalia.service \
+            usr/lib/systemd/user/labctalia-theme-sync.path \
+            usr/lib/systemd/user/labctalia-theme-sync.service \
+            usr/lib/systemd/user/labctalia-gestures.service \
+            usr/share/xdg-desktop-portal/labctalia-portals.conf \
+            etc/xdg/labwc/rc.xml \
+            etc/xdg/labwc/menu.xml \
+            usr/share/themes/macos-dark/labwc/themerc \
+            usr/share/doc/labctalia-session/README.md \
+            usr/share/licenses/labctalia-session/LICENSE \
+            usr/share/licenses/labctalia-session/LICENSE.macos-dark-theme; do
+            grep -qE "^-rw-r--r-- .*${path}\$" /tmp/pkglist.txt
+          done
+
+      - name: Install/remove smoke test
+        run: |
+          set -euo pipefail
+          # --nodeps: labwc/noctalia/portals are not in this container.
+          pacman -U --noconfirm --nodeps /tmp/pkgout/*.pkg.tar.zst
+          test -x /usr/bin/labctalia-session
+          test -x /usr/bin/labctalia-session-default
+          test -x /usr/bin/labctalia-theme-sync
+          test -x /usr/bin/labctalia-4finger-gestures
+          test -x /usr/bin/labctalia-screenshot
+          test -f /usr/lib/systemd/user/labctalia-noctalia.service
+          # The post_install script must not need /etc/greetd (and must not
+          # edit it). Verify the units resolve, then remove the package.
+          install -d -m 700 /tmp/run
+          XDG_RUNTIME_DIR=/tmp/run systemd-analyze --user verify \
+            /usr/lib/systemd/user/labctalia-session.target \
+            /usr/lib/systemd/user/labctalia-noctalia.service \
+            /usr/lib/systemd/user/labctalia-theme-sync.path \
+            /usr/lib/systemd/user/labctalia-theme-sync.service \
+            /usr/lib/systemd/user/labctalia-gestures.service
+          pacman -R --noconfirm labctalia-session
